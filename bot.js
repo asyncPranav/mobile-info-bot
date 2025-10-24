@@ -7,24 +7,20 @@ dotenv.config();
 // Read tokens from environment variables
 const TOKEN = process.env.TELEGRAM_TOKEN;
 const API_KEY = process.env.MOBILE_API_KEY;
-
-if (!TOKEN || !API_KEY) {
-  console.error("Missing TELEGRAM_TOKEN or MOBILE_API_KEY in environment.");
-  process.exit(1);
-}
-
-const SHOW_SENSITIVE = String(process.env.SHOW_SENSITIVE || "").toLowerCase() === "true";
-
-// Upstream mobile info API (with key secured in environment)
 const API_BASE = process.env.MOBILE_API_BASE;
+const SHOW_SENSITIVE = String(process.env.SHOW_SENSITIVE || "").toLowerCase() === "true";
+const ACCESS_CODE = process.env.ACCESS_CODE;
 
-if (!API_BASE) {
-  console.error("Missing MOBILE_API_BASE in environment.");
+if (!TOKEN || !API_KEY || !API_BASE || !ACCESS_CODE) {
+  console.error("Missing required environment variables. Check TELEGRAM_TOKEN, MOBILE_API_KEY, MOBILE_API_BASE, ACCESS_CODE.");
   process.exit(1);
 }
 
 const bot = new TelegramBot(TOKEN, { polling: true });
 console.log("✅ Bot started. SHOW_SENSITIVE =", SHOW_SENSITIVE);
+
+// In-memory store of authorized users (small bot, 3-4 users)
+const authorizedUsers = {};
 
 /* Helpers */
 function maskString(s, keepLast = 4) {
@@ -52,14 +48,14 @@ function safeLine(label, value) {
 bot.onText(/\/start/, (msg) => {
   bot.sendMessage(
     msg.chat.id,
-    `👋 Hello ${msg.chat.first_name || ""}!\nSend a mobile number (digits only) to lookup info.\n\nNote: Sensitive fields are masked by default. To enable full output locally (only if you have lawful consent), set SHOW_SENSITIVE=true in your environment.`
+    `👋 Hello ${msg.chat.first_name || ""}!\nSend your access code to start using the bot.`
   );
 });
 
 bot.onText(/\/help/, (msg) => {
   bot.sendMessage(
     msg.chat.id,
-    "Send a mobile number like `9876543210`. The bot will return Number, Operator, and additional fields returned by the API (sensitive fields are masked by default).",
+    "Send your access code first to access the bot.\nOnce authorized, send a mobile number like `9876543210` to get info.",
     { parse_mode: "Markdown" }
   );
 });
@@ -69,7 +65,21 @@ bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
   const text = String(msg.text || "").trim();
 
-  if (!text || text.startsWith("/")) return;
+  // ignore commands
+  if (!text) return;
+
+  // Step 1: Check if user is authorized
+  if (!authorizedUsers[chatId]) {
+    if (text === ACCESS_CODE) {
+      authorizedUsers[chatId] = true;
+      bot.sendMessage(chatId, "✅ Access granted! You can now use the bot.");
+    } else {
+      bot.sendMessage(chatId, "🔒 Enter the access code to use this bot:");
+    }
+    return; // Stop further processing until authorized
+  }
+
+  // Step 2: Validate mobile number
   if (!/^\d{6,15}$/.test(text)) {
     bot.sendMessage(chatId, "⚠️ Please send a valid mobile number (digits only). Example: `9876543210`", { parse_mode: "Markdown" });
     return;
