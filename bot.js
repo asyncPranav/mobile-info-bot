@@ -19,7 +19,7 @@ if (!TOKEN || !API_KEY || !API_BASE || !ACCESS_CODE) {
 const bot = new TelegramBot(TOKEN, { polling: true });
 console.log("✅ Bot started. SHOW_SENSITIVE =", SHOW_SENSITIVE);
 
-// In-memory store of authorized users (small bot, 3-4 users)
+// In-memory store of authorized users
 const authorizedUsers = {};
 
 /* Helpers */
@@ -48,14 +48,15 @@ function safeLine(label, value) {
 bot.onText(/\/start/, (msg) => {
   bot.sendMessage(
     msg.chat.id,
-    `👋 Hello ${msg.chat.first_name || ""}!\nSend your access code to start using the bot.`
+    `👋 Hello ${msg.chat.first_name || ""}!\n\nWelcome to the **Mobile Info Bot** 🔍\n\nTo begin, please enter your **access code**. This ensures only authorized users can use the bot.`,
+    { parse_mode: "Markdown" }
   );
 });
 
 bot.onText(/\/help/, (msg) => {
   bot.sendMessage(
     msg.chat.id,
-    "Send your access code first to access the bot.\nOnce authorized, send a mobile number like `9876543210` to get info.",
+    "📌 **How to use:**\n1. Send your access code to unlock the bot.\n2. Once authorized, send a mobile number (digits only) to fetch details like Name, Operator, Address, and more.\n\n🔒 Sensitive fields are masked by default.",
     { parse_mode: "Markdown" }
   );
 });
@@ -65,30 +66,38 @@ bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
   const text = String(msg.text || "").trim();
 
-  // ignore commands
   if (!text) return;
 
-  // Step 1: Check if user is authorized
+  // Step 1: Authorization
   if (!authorizedUsers[chatId]) {
     if (text === ACCESS_CODE) {
       authorizedUsers[chatId] = true;
-      bot.sendMessage(chatId, "✅ Access granted! You can now use the bot.");
+      bot.sendMessage(chatId,
+        "✅ **Access Granted!**\n\nYou can now use the Mobile Info Bot. Send a mobile number (digits only) to fetch info.",
+        { parse_mode: "Markdown" }
+      );
     } else {
-      bot.sendMessage(chatId, "🔒 Enter the access code to use this bot:");
+      bot.sendMessage(chatId,
+        "🔒 **Access Restricted**\nPlease enter your access code to use this bot.",
+        { parse_mode: "Markdown" }
+      );
     }
     return; // Stop further processing until authorized
   }
 
   // Step 2: Validate mobile number
   if (!/^\d{6,15}$/.test(text)) {
-    bot.sendMessage(chatId, "⚠️ Please send a valid mobile number (digits only). Example: `9876543210`", { parse_mode: "Markdown" });
+    bot.sendMessage(chatId,
+      "⚠️ Please send a valid mobile number (digits only). Example: `9876543210`",
+      { parse_mode: "Markdown" }
+    );
     return;
   }
 
   try {
     await bot.sendMessage(chatId, "🔍 Fetching info...");
 
-    // API call with key from environment
+    // API call
     const url = `${API_BASE}${encodeURIComponent(text)}&key=${API_KEY}`;
     const res = await fetch(url, { timeout: 10000 });
 
@@ -115,7 +124,7 @@ bot.on("message", async (msg) => {
     const altNum = SHOW_SENSITIVE ? (item.alt ?? "N/A") : (item.alt ? maskString(item.alt, 4) : "N/A");
 
     const replyLines = [
-      "📱 Mobile Info",
+      "📱 **Mobile Info**",
       "────────────────────",
       safeLine("Number", number),
       safeLine("Name", name),
@@ -129,10 +138,10 @@ bot.on("message", async (msg) => {
 
     replyLines.push(SHOW_SENSITIVE
       ? "⚠️ Sensitive output is ENABLED. Make sure you have lawful consent."
-      : "🔒 Sensitive fields are masked. To enable full output (only if you have consent), set SHOW_SENSITIVE=true in env."
+      : "🔒 Sensitive fields are masked. To enable full output (with consent), set SHOW_SENSITIVE=true in env."
     );
 
-    await bot.sendMessage(chatId, replyLines.join("\n"));
+    await bot.sendMessage(chatId, replyLines.join("\n"), { parse_mode: "Markdown" });
   } catch (err) {
     console.error("Error:", err);
     bot.sendMessage(chatId, `❌ Failed to fetch/process data: ${err.message}`);
