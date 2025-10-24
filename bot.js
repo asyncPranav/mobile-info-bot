@@ -68,6 +68,9 @@ bot.on("message", async (msg) => {
 
   if (!text) return;
 
+  // Ignore commands (they have their own handlers)
+  if (text.startsWith("/")) return;
+
   // Step 1: Authorization
   if (!authorizedUsers[chatId]) {
     if (text === ACCESS_CODE) {
