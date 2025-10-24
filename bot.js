@@ -22,6 +22,13 @@ console.log("✅ Bot started. SHOW_SENSITIVE =", SHOW_SENSITIVE);
 // In-memory store of authorized users
 const authorizedUsers = {};
 
+// In-memory lookup stats
+const stats = { total: 0, perUser: {} };
+
+// Rate limiting data
+const lastRequest = {};
+const RATE_LIMIT_MS = 10000; // 10 seconds
+
 /* Helpers */
 function maskString(s, keepLast = 4) {
   if (!s) return "N/A";
@@ -61,6 +68,23 @@ bot.onText(/\/help/, (msg) => {
   );
 });
 
+// New: /stats command
+bot.onText(/\/stats/, (msg) => {
+  const chatId = msg.chat.id;
+  if (!authorizedUsers[chatId]) {
+    bot.sendMessage(chatId, "🔒 Access denied. Please enter your access code first.");
+    return;
+  }
+
+  const userLookups = stats.perUser[chatId] || 0;
+  const total = stats.total;
+  bot.sendMessage(
+    chatId,
+    `📊 *Lookup Stats*\nYour lookups: ${userLookups}\nTotal lookups: ${total}`,
+    { parse_mode: "Markdown" }
+  );
+});
+
 /* Main handler */
 bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
@@ -88,7 +112,16 @@ bot.on("message", async (msg) => {
     return; // Stop further processing until authorized
   }
 
-  // Step 2: Validate mobile number
+  // Step 2: Rate limiting
+  const now = Date.now();
+  if (lastRequest[chatId] && now - lastRequest[chatId] < RATE_LIMIT_MS) {
+    const wait = Math.ceil((RATE_LIMIT_MS - (now - lastRequest[chatId])) / 1000);
+    bot.sendMessage(chatId, `⏱ Please wait ${wait}s before sending another request.`);
+    return;
+  }
+  lastRequest[chatId] = now;
+
+  // Step 3: Validate mobile number
   if (!/^\d{6,15}$/.test(text)) {
     bot.sendMessage(chatId,
       "⚠️ Please send a valid mobile number (digits only). Example: `9876543210`",
@@ -143,6 +176,10 @@ bot.on("message", async (msg) => {
       ? "⚠️ Sensitive output is ENABLED. Make sure you have lawful consent."
       : "🔒 Sensitive fields are masked. To enable full output (with consent), set SHOW_SENSITIVE=true in env."
     );
+
+    // Update lookup stats
+    stats.total++;
+    stats.perUser[chatId] = (stats.perUser[chatId] || 0) + 1;
 
     await bot.sendMessage(chatId, replyLines.join("\n"), { parse_mode: "Markdown" });
   } catch (err) {
