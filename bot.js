@@ -17,12 +17,10 @@ if (!TOKEN || !API_KEY || !API_BASE || !ACCESS_CODE) {
 }
 
 const bot = new TelegramBot(TOKEN, { polling: true });
-console.log("✅ Bot started. SHOW_SENSITIVE =", SHOW_SENSITIVE);
+console.log("✅ Mobile Info Bot started. SHOW_SENSITIVE =", SHOW_SENSITIVE);
 
-// In-memory store of authorized users
-const authorizedUsers = {};
-
-// In-memory lookup stats
+// In-memory store of authorized users and their queries
+const authorizedUsers = {}; // { chatId: true }
 const stats = { total: 0, perUser: {} };
 
 // Rate limiting data
@@ -55,7 +53,7 @@ function safeLine(label, value) {
 bot.onText(/\/start/, (msg) => {
   bot.sendMessage(
     msg.chat.id,
-    `👋 Hello ${msg.chat.first_name || ""}!\n\nWelcome to the **Mobile Info Bot** 🔍\n\nTo begin, please enter your **access code**. This ensures only authorized users can use the bot.`,
+    `👋 Hello ${msg.chat.first_name || ""}!\n\nWelcome to the **Mobile Info Bot** 🔍\n\nTo begin, please enter your **access code**.`,
     { parse_mode: "Markdown" }
   );
 });
@@ -63,12 +61,12 @@ bot.onText(/\/start/, (msg) => {
 bot.onText(/\/help/, (msg) => {
   bot.sendMessage(
     msg.chat.id,
-    "📌 **How to use:**\n1. Send your access code to unlock the bot.\n2. Once authorized, send a mobile number (digits only) to fetch details like Name, Operator, Address, and more.\n\n🔒 Sensitive fields are masked by default.",
+    "📌 **How to use:**\n1. Send your access code to unlock the bot.\n2. Once authorized, send a mobile number (digits only) to fetch details.\n\n🔒 Sensitive fields are masked by default.",
     { parse_mode: "Markdown" }
   );
 });
 
-// New: /stats command
+// /stats command
 bot.onText(/\/stats/, (msg) => {
   const chatId = msg.chat.id;
   if (!authorizedUsers[chatId]) {
@@ -91,16 +89,15 @@ bot.on("message", async (msg) => {
   const text = String(msg.text || "").trim();
 
   if (!text) return;
-
-  // Ignore commands (they have their own handlers)
-  if (text.startsWith("/")) return;
+  if (text.startsWith("/")) return; // ignore commands
 
   // Step 1: Authorization
   if (!authorizedUsers[chatId]) {
     if (text === ACCESS_CODE) {
       authorizedUsers[chatId] = true;
+      stats.perUser[chatId] = 0; // initialize user query count
       bot.sendMessage(chatId,
-        "✅ **Access Granted!**\n\nYou can now use the Mobile Info Bot. Send a mobile number (digits only) to fetch info.",
+        "✅ **Access Granted!**\n\nYou can now send a mobile number (digits only) to fetch info.",
         { parse_mode: "Markdown" }
       );
     } else {
@@ -109,7 +106,7 @@ bot.on("message", async (msg) => {
         { parse_mode: "Markdown" }
       );
     }
-    return; // Stop further processing until authorized
+    return;
   }
 
   // Step 2: Rate limiting
@@ -133,7 +130,6 @@ bot.on("message", async (msg) => {
   try {
     await bot.sendMessage(chatId, "🔍 Fetching info...");
 
-    // API call
     const url = `${API_BASE}${encodeURIComponent(text)}&key=${API_KEY}`;
     const res = await fetch(url, { timeout: 10000 });
 
@@ -150,7 +146,6 @@ bot.on("message", async (msg) => {
       return;
     }
 
-    // Map API fields
     const number = item.mobile ?? text;
     const operator = item.circle ?? "N/A";
     const name = SHOW_SENSITIVE ? (item.name ?? "N/A") : (item.name ? maskName(item.name) : "N/A");
@@ -174,10 +169,10 @@ bot.on("message", async (msg) => {
 
     replyLines.push(SHOW_SENSITIVE
       ? "⚠️ Sensitive output is ENABLED. Make sure you have lawful consent."
-      : "🔒 Sensitive fields are masked. To enable full output (with consent), set SHOW_SENSITIVE=true in env."
+      : "🔒 Sensitive fields are masked. To enable full output, set SHOW_SENSITIVE=true in env."
     );
 
-    // Update lookup stats
+    // Update stats
     stats.total++;
     stats.perUser[chatId] = (stats.perUser[chatId] || 0) + 1;
 
